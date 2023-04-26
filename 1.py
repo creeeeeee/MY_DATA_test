@@ -25,21 +25,26 @@ instance_token, sample_token = mini_train[0].split("_")
 annotation = helper.get_sample_annotation(instance_token, sample_token)
 
 #%%
+nuscenes.list_scenes()
+#%%
 #nuscenes.list_scenes() # 10个场景
 my_scene = nuscenes.scene[0]
 first_sample_token = my_scene['first_sample_token']
 my_sample = nuscenes.get('sample', first_sample_token)
 
 #%%
-my_annotation_token = my_sample['anns'][18]
+my_annotation_token = my_sample['anns'][19]
 my_annotation_metadata = nuscenes.get('sample_annotation', my_annotation_token)
-my_annotation_metadata
+len(mini_train)
 
 #%%
+instance_token, sample_token = mini_train[3].split("_")
 future_xy_local = helper.get_future_for_agent(instance_token, sample_token, seconds=4, in_agent_frame=True)
-
+past = helper.get_past_for_agent(instance_token, sample_token, seconds=2, in_agent_frame=True)
 sample = helper.get_annotations_for_sample(sample_token)
-len(sample)
+
+motion_s = helper.get_past_motion_states(instance_token, sample_token)
+
 #%%
 from nuscenes.map_expansion.map_api import NuScenesMap
 nusc_map = NuScenesMap(map_name='singapore-onenorth', dataroot=DATAROOT)
@@ -48,7 +53,6 @@ nusc_map = NuScenesMap(map_name='singapore-onenorth', dataroot=DATAROOT)
 x, y, yaw = 395, 1095, 0
 closest_lane = nusc_map.get_closest_lane(x, y, radius=2)
 lane_record = nusc_map.get_arcline_path(closest_lane)
-lane_record
 
 #%%
 from nuscenes.map_expansion import arcline_path_utils

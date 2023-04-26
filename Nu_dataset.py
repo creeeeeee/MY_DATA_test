@@ -82,11 +82,15 @@ class Nu_dataset(Dataset):
         self.nuscenes = nuscenes
         self.map_city = ['singapore-onenorth', 'singapore-hollandvillage',
                          'singapore-queenstown', 'boston-seaport']
-        self.helper = PredictHelper(nuscenes)
+        self.helper = helper
+        self.maps = {i: NuScenesMap(map_name=i, dataroot=self.helper.data.dataroot) for i in self.map_city}
         # 默认不采用地图拓展
         self.map_extent = False
-        self.data = get_prediction_challenge_split(data_split, dataroot=root)
+        self.data_split = get_prediction_challenge_split(data_split, dataroot=root)
 
+        # time: -2s TO +4s
+        self.obs = 2
+        self.fur = 4
 
     @property
     def raw_file_names(self):  # 原始数据文件夹存放位置
@@ -121,11 +125,21 @@ class Nu_dataset(Dataset):
 
     def process(self):  # 处理数据的函数,最关键（怎么创建，怎么保存）
         idx = 0
-
-        for raw_path in self.raw_paths:
+        # for idx in range(len(self.data_split)):
             # Read data from `raw_path`.
-            data = Data(...)
-
+        for instance_sample in self.data_split:
+            target_feats = self.get_target_agent(instance_sample)
+            lane_feats = self.get_map(instance_sample)
+            other_feats = self.get_other(instance_sample)
+            all_feats = {
+                "target":target_feats,
+                "lane":lane_feats,
+                "other":other_feats
+            }
+            data = Data(
+                edge_index=torch.from_numpy(np.array()),
+                x=torch.from_numpy(np.array()),
+            )
             if self.pre_filter is not None and not self.pre_filter(data):
                 continue
 
@@ -135,11 +149,6 @@ class Nu_dataset(Dataset):
             torch.save(data, os.path.join(self.processed_dir, f'data_{idx}.pt'))
             idx += 1
 
-
-
-
-    # len和get是区别于in memory dataset的主要函数
-
     def len(self):  # 返回数据集中示例的数目。
 
         return len(self.processed_file_names)
@@ -148,3 +157,122 @@ class Nu_dataset(Dataset):
     def get(self, idx):  # 实现加载单个图的逻辑。
         data = torch.load(os.path.join(self.processed_dir, 'data_{}.pt'.format(idx)))
         return data
+
+    def get_target_agent(self, instance_sample):
+        instance_token, sample_token = instance_sample.split("_")
+        past = self.helper.get_past_for_agent(instance_token, sample_token, seconds=self.obs, in_agent_frame=True)
+        past = np.flip(past, 0)
+        past_pad = np.zeros((int(self.obs) * 2 + 1, 2)) # 0填充空余部分
+        past_pad[-past.shape[0]-1: -1] = past
+        past = past_pad
+
+        past_ = self.helper.get_past_for_agent(instance_token, sample_token, seconds=self.obs, in_agent_frame=True, just_xy=False)
+        states = np.zeros((2 * self.obs + 1, 3))
+        states[-1, 0] = self.helper.get_velocity_for_agent(instance_token, sample_token)
+        states[-1, 1] = self.helper.get_acceleration_for_agent(instance_token, sample_token)
+        states[-1, 2] = self.helper.get_heading_change_rate_for_agent(instance_token, sample_token)
+
+        for i in range(len(past_)):
+            states[-(i + 2), 0] = self.helper.get_velocity_for_agent(instance_token, past_[i]['sample_token'])
+            states[-(i + 2), 1] = self.helper.get_acceleration_for_agent(instance_token, past_[i]['sample_token'])
+            states[-(i + 2), 2] = self.helper.get_heading_change_rate_for_agent(instance_token, past_[i]['sample_token'])
+        states = np.nan_to_num(states)
+
+        past = np.concatenate((past, states), axis=1)
+        return past
+
+    def get_map(self,instance_sample):
+        instance_token, sample_token = instance_sample.split("_")
+        map_id = self.helper.get_map_name_from_sample_token(sample_token)
+        map_api = self.maps[map_id]
+
+        sample_annotation = self.helper.get_sample_annotation(instance_token, sample_token)
+        x, y = sample_annotation['translation'][:2]
+        yaw = quaternion_yaw(Quaternion(sample_annotation['rotation']))
+        yaw = correct_yaw(yaw)
+        global_pose = (x, y, yaw) # 获取世界坐标系下的坐标和yaw
+
+        lanes = self.get_lanes_around_agent(global_pose, map_api)
+        polygons = self.get_polygons_around_agent(global_pose, map_api)
+
+        lane_node_feats, _ = self.get_lane_node_feats(global_pose, lanes, polygons)
+        lane_node_feats = self.discard_poses_outside_extent(lane_node_feats)
+        # 空 pad 0
+        if len(lane_node_feats) == 0:
+            lane_node_feats = [np.zeros((1, 5))]
+
+        lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 5)
+        lane_feats = {
+            'lane_node_feats': lane_node_feats,
+            'lane_node_masks': lane_node_masks
+        }
+
+        return lane_feats
+    def get_other(self,instance_sample):
+        # 获得周围车辆或者行人的特征
+
+        instance_token, sample_token = instance_sample.split("_")
+
+        vehicles = self.get_agents_of_type(instance_token, sample_token, 'vehicle')
+        pedestrians = self.get_agents_of_type(instance_token, sample_token, 'human')
+
+        # Discard poses outside map extent
+        vehicles = self.discard_poses_outside_extent(vehicles)
+        pedestrians = self.discard_poses_outside_extent(pedestrians)
+
+        # While running the dataset class in 'compute_stats' mode:
+        if self.mode == 'compute_stats':
+            return len(vehicles), len(pedestrians)
+
+        # Convert to fixed size arrays for batching
+        vehicles, vehicle_masks = self.list_to_tensor(vehicles, self.max_vehicles, self.obs * 2 + 1, 5)
+        pedestrians, pedestrian_masks = self.list_to_tensor(pedestrians, self.max_pedestrians, self.obs * 2 + 1, 5)
+
+        other_data = {
+            'vehicles': vehicles,
+            'vehicle_masks': vehicle_masks,
+            'pedestrians': pedestrians,
+            'pedestrian_masks': pedestrian_masks
+        }
+
+        return other_data
+
+
+    def get_agents_of_type(self, instance_token, sample_token, agent_type: str):
+        #
+        # instance_token, sample_token = self.token_list[idx].split("_")
+        # origin = self.get_target_agent_global_pose(idx)
+        origin = self.helper.get_annotations_for_sample(sample_token)
+        agent_details = self.helper.get_past_for_sample(instance_token, seconds=self.obs, in_agent_frame=False, just_xy=False)
+        agent_hist = self.helper.get_past_for_sample(sample_token, seconds=self.obs, in_agent_frame=False, just_xy=True)
+        present_time = self.helper.get_annotations_for_sample(sample_token)
+        for annotation in present_time:
+            ann_i_t = annotation['instance_token']
+            if ann_i_t in agent_hist.keys():
+                present_pose = np.asarray(annotation['translation'][0:2]).reshape(1, 2)
+                if agent_hist[ann_i_t].any():
+                    agent_hist[ann_i_t] = np.concatenate((present_pose, agent_hist[ann_i_t]))
+                else:
+                    agent_hist[ann_i_t] = present_pose
+
+        agent_list = []
+        agent_i_ts = []
+        for k, v in agent_details.items():
+            if v and agent_type in v[0]['category_name'] and v[0]['instance_token'] != i_t:
+                agent_list.append(agent_hist[k])
+                agent_i_ts.append(v[0]['instance_token'])
+
+        for agent in agent_list:
+            for n, pose in enumerate(agent):
+                local_pose = self.global_to_local(origin, (pose[0], pose[1], 0))
+                agent[n] = np.asarray([local_pose[0], local_pose[1]])
+
+        for n, agent in enumerate(agent_list):
+            xy = np.flip(agent, axis=0)
+            motion_states = self.get_past_motion_states(agent_i_ts[n], s_t)
+            motion_states = motion_states[-len(xy):, :]
+            agent_list[n] = np.concatenate((xy, motion_states), axis=1)
+
+        return agent_list
+
+
