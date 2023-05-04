@@ -131,10 +131,14 @@ class Nu_dataset(Dataset):
             target_feats = self.get_target_agent(instance_sample)
             lane_feats = self.get_map(instance_sample)
             other_feats = self.get_other(instance_sample)
+
+            # 更改结构,采用pyg data格式
+            #
+
             all_feats = {
-                "target":target_feats,
-                "lane":lane_feats,
-                "other":other_feats
+                "target": target_feats,
+                "lane": lane_feats,
+                "other": other_feats
             }
             data = Data(
                 edge_index=torch.from_numpy(np.array()),
