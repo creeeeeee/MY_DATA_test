@@ -39,8 +39,23 @@ global_pose = (x, y, yaw)
 
 
 #%%
+layer_ = ['drivable_area', # 可驾驶区域
+ 'road_segment',  #
+ 'road_block',
+ 'lane',
+ 'ped_crossing',
+ 'walkway',
+ 'stop_line',
+ 'carpark_area',
+ 'road_divider',
+ 'lane_divider',
+ 'traffic_light']
+
 radius = max([-50, 50, -20, 80])
 lanes = map_api.get_records_in_radius(x, y, radius, ['lane', 'lane_connector'])
+
+#%%
+sample_polygon = map_api.polygon[3]
 
 #%%
 lanes = lanes['lane'] + lanes['lane_connector']
@@ -203,10 +218,20 @@ from nuscenes.map_expansion.bitmap import BitMap
 
 nusc_map = NuScenesMap(dataroot='/home/labone/labone/jcy/nuscenes/data/mini2/', map_name='singapore-onenorth')
 #%%
-fig, ax = nusc_map.render_layers(nusc_map.non_geometric_layers, figsize=1)
+sample_drivable_area = nusc_map.drivable_area[0]
+fig, ax = nusc_map.render_record('drivable_area', sample_drivable_area['token'],other_layers=[])
+
 plt.figure()
+plt.subplots_adjust(bottom=0.3)
 plt.show()
 
+#%%
+
+sample_road_segment = nusc_map.road_segment[600]
+sample_intersection_road_segment = nusc_map.road_segment[3]
+fig, ax = nusc_map.render_record('road_segment', sample_intersection_road_segment['token'], other_layers=[])
+plt.figure()
+plt.show()
 
 #%%
 bitmap = BitMap(nusc_map.dataroot, nusc_map.map_name, 'basemap')
