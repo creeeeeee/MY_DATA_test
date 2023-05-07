@@ -88,9 +88,9 @@ class Nu_dataset(Dataset):
         self.map_extent = False
         self.data_split = get_prediction_challenge_split(data_split, dataroot=root)
 
-        # time: -2s TO +4s
-        self.obs = 2
-        self.fur = 4
+        # time: -4s TO +2s
+        self.obs = 5
+        self.fur = 2
 
     @property
     def raw_file_names(self):  # 原始数据文件夹存放位置
