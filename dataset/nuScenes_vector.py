@@ -85,7 +85,7 @@ class NuScenesVector(NuScenesTrajectories):
         # x, y co-ordinates in agent's frame of reference
         hist = self.helper.get_past_for_agent(i_t, s_t, seconds=self.t_h, in_agent_frame=True)
 
-        # Zero pad for track histories shorter than t_h
+        # Zero pad for track histories shorter than t_h 零填充很重要
         hist_zeropadded = np.zeros((int(self.t_h) * 2 + 1, 2))
 
         # Flip to have correct order of timestamps
@@ -220,7 +220,7 @@ class NuScenesVector(NuScenesTrajectories):
         for k, v in record_tokens.items():
             for record_token in v:
                 polygon_token = map_api.get(k, record_token)['polygon_token']
-                polygons[k].append(map_api.extract_polygon(polygon_token))
+                polygons[k].append(map_api.extract_polygon(polygon_token)) # 很重要
 
         return polygons
 
@@ -268,7 +268,7 @@ class NuScenesVector(NuScenesTrajectories):
         agent_details = self.helper.get_past_for_sample(s_t, seconds=self.t_h, in_agent_frame=False, just_xy=False)
         agent_hist = self.helper.get_past_for_sample(s_t, seconds=self.t_h, in_agent_frame=False, just_xy=True)
 
-        # Add present time to agent histories
+        # Add present time to agent histories        # 当前时间
         present_time = self.helper.get_annotations_for_sample(s_t)
         for annotation in present_time:
             ann_i_t = annotation['instance_token']
@@ -283,7 +283,7 @@ class NuScenesVector(NuScenesTrajectories):
         agent_list = []
         agent_i_ts = []
         for k, v in agent_details.items():
-            if v and agent_type in v[0]['category_name'] and v[0]['instance_token'] != i_t:
+            if v and agent_type in v[0]['category_name'] and v[0]['instance_token'] != i_t: # 这里是用来判断v存在并且属于这一类，而且要去掉目标instance token
                 agent_list.append(agent_hist[k])
                 agent_i_ts.append(v[0]['instance_token'])
 
