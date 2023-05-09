@@ -191,14 +191,14 @@ class Nu_dataset(Dataset):
         :return inputs: Dictionary with input representations
         """
         i_t, s_t = self.token_list[idx].split("_")
-        map_representation = self.get_map_representation(idx)
-        surrounding_agent_representation = self.get_surrounding_agent_representation(idx)
+        map_representation,num_lane = self.get_map_representation(idx)
+        surrounding_agent_representation,num_veh,num_ped = self.get_surrounding_agent_representation(idx)
         target_agent_representation = self.get_target_agent_representation(idx)
         inputs = {'instance_token': i_t,
-                  'sample_token': s_t,
-                  'map_representation': map_representation,
-                  'surrounding_agent_representation': surrounding_agent_representation,
-                  'target_agent_representation': target_agent_representation}
+                    'sample_token': s_t,
+                    'map_representation': map_representation,
+                    'surrounding_agent_representation': surrounding_agent_representation,
+                    'target_agent_representation': target_agent_representation}
         return inputs
 
     def get_target_agent_global_pose(self, idx: int) -> Tuple[float, float, float]:
@@ -226,7 +226,32 @@ class Nu_dataset(Dataset):
         ground_truth = {'traj': target_agent_future}
         return ground_truth
 
-    def get_map_representation(self, idx: int) -> Union[int, Dict]:
+    def get_target_agent_representation(self, idx: int) -> np.ndarray:
+        """
+        Extracts target agent representation
+        :param idx: data index
+        :return hist: track history for target agent, shape: [t_h * 2, 5]
+        """
+        i_t, s_t = self.token_list[idx].split("_")
+
+        # x, y co-ordinates in agent's frame of reference
+        hist = self.helper.get_past_for_agent(i_t, s_t, seconds=self.t_h, in_agent_frame=True)
+
+        # Zero pad for track histories shorter than t_h 零填充很重要
+        hist_zeropadded = np.zeros((int(self.t_h) * 2 + 1, 2))
+
+        # Flip to have correct order of timestamps
+        hist = np.flip(hist, 0)
+        hist_zeropadded[-hist.shape[0]-1: -1] = hist
+        hist = hist_zeropadded
+
+        # Get velocity, acc and yaw_rate over past t_h sec
+        motion_states = self.get_past_motion_states(i_t, s_t)
+        hist = np.concatenate((hist, motion_states), axis=1)
+
+        return hist
+
+    def get_map_representation(self, idx: int) -> Tuple[Dict, int]:
         """
         Extracts map representation
         :param idx: data index
@@ -257,8 +282,8 @@ class Nu_dataset(Dataset):
             lane_node_feats = [np.zeros((1, 5))]
 
         # While running the dataset class in 'compute_stats' mode:
-        if self.mode == 'compute_stats':
-            return len(lane_node_feats)
+        # if self.mode == 'compute_stats':
+        #     return len(lane_node_feats)
 
         # Convert list of lane node feats to fixed size numpy array and masks
         lane_node_feats, lane_node_masks = self.list_to_tensor(lane_node_feats, self.max_nodes, self.polyline_length, 5)
@@ -268,10 +293,13 @@ class Nu_dataset(Dataset):
             'lane_node_masks': lane_node_masks
         }
 
-        return map_representation
+        num_lane = len(lane_node_feats)
 
+        return map_representation, num_lane
+
+    #  Union[Tuple[int, int], Dict]:
     def get_surrounding_agent_representation(self, idx: int) -> \
-            Union[Tuple[int, int], Dict]:
+            Tuple[Dict, int, int]:
         """
         Extracts surrounding agent representation
         :param idx: data index
@@ -287,8 +315,8 @@ class Nu_dataset(Dataset):
         pedestrians = self.discard_poses_outside_extent(pedestrians)
 
         # While running the dataset class in 'compute_stats' mode:
-        if self.mode == 'compute_stats':
-            return len(vehicles), len(pedestrians)
+        # if self.mode == 'compute_stats':
+        #     return len(vehicles), len(pedestrians)
 
         # Convert to fixed size arrays for batching
         vehicles, vehicle_masks = self.list_to_tensor(vehicles, self.max_vehicles, self.t_h * 2 + 1, 5)
@@ -300,8 +328,9 @@ class Nu_dataset(Dataset):
             'pedestrians': pedestrians,
             'pedestrian_masks': pedestrian_masks
         }
-
-        return surrounding_agent_representation
+        num_veh = len(vehicles)
+        num_ped = len(pedestrians)
+        return surrounding_agent_representation, num_veh, num_ped
 
     def get_lanes_around_agent(self, global_pose: Tuple[float, float, float], map_api: NuScenesMap) -> Dict:
         """

@@ -231,7 +231,8 @@ class NuScenesVector(NuScenesTrajectories):
         :param origin: (x, y, yaw) of target agent in global co-ordinates
         :param lanes: lane centerline poses in global co-ordinates
         :param polygons: stop-line and cross-walk polygons in global co-ordinates
-        :return:
+        :return: lane_node_feats: lane_node_feats
+                    lane_node_ids: lane_node_ids
         """
 
         # Convert lanes to list
@@ -430,7 +431,7 @@ class NuScenesVector(NuScenesTrajectories):
                 for n, k in enumerate(polygons.keys()):
                     polygon_list = polygons[k]
                     for polygon in polygon_list:
-                        if polygon.contains(point):
+                        if polygon.contains(point): # 用polygon 和point来判断是否在多边形范围内
                             lane_flags[lane_num][pose_num][n] = 1
                             break
 
