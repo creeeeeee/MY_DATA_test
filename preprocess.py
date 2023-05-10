@@ -25,8 +25,8 @@ def preprocess():
            'traversal_horizon': 15,
            'random_flips': True
            }
-    data_split = get_prediction_challenge_split('mini_train', dataroot=DATAROOT)
-    train_data = Nu_dataset(DATAROOT, nuscenes, helper, data_split,args)
+    data_split = 'mini_train'
+    train_data = Nu_dataset(DATAROOT, nuscenes, helper, data_split,arg)
 
     # data_split = get_prediction_challenge_split('mini_train', dataroot=DATAROOT)  # list
     #
