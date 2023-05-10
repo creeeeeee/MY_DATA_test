@@ -7,6 +7,8 @@ import pickle
 from typing import List, Dict
 import torch.utils.data as torch_data
 from dataset.nuScenes_vector import NuScenesVector
+from dataset.Nu_dataset import Nu_dataset
+from nuscenes.eval.prediction.splits import get_prediction_challenge_split
 
 DATAROOT='/home/labone/labone/jcy/nuscenes/data/mini2/'
 
@@ -23,14 +25,20 @@ def preprocess():
            'traversal_horizon': 15,
            'random_flips': True
            }
+    data_split = get_prediction_challenge_split('mini_train', dataroot=DATAROOT)
+    train_data = Nu_dataset(DATAROOT, nuscenes, helper, data_split,args)
 
-    train_data = NuScenesVector('compute_stats', DATAROOT, arg, helper)
-    train_set = NuScenesVector('extract_data', DATAROOT, arg, helper)
-
-    y = train_set[3]
-
-    real_data = NuScenesVector('load_data', DATAROOT, arg, helper)
+    # data_split = get_prediction_challenge_split('mini_train', dataroot=DATAROOT)  # list
+    #
+    #
+    # train_data = NuScenesVector('compute_stats', DATAROOT, arg, helper)
     # compute_dataset_stats([train_data], 4, 0, verbose=True)
+    # train_set = NuScenesVector('extract_data', DATAROOT, arg, helper)
+    #
+    # y = train_set[3]
+    #
+    # real_data = NuScenesVector('load_data', DATAROOT, arg, helper)
+
 
     # val_data = Nu_dataset(DATAROOT, nuscenes, helper, 'train_val')
     # test_data = Nu_dataset(DATAROOT, nuscenes, helper, 'mini_val')

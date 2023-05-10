@@ -85,7 +85,7 @@ class Nu_dataset(Dataset):
         self.helper = helper
         self.maps = {i: NuScenesMap(map_name=i, dataroot=self.helper.data.dataroot) for i in self.map_city}
         # 默认不采用地图拓展
-        self.map_extent = [ -50, 50, -20, 80 ]
+        self.map_extent = [-50, 50, -20, 80]
         self.data_split = get_prediction_challenge_split(data_split, dataroot=root)  # list
 
         # time: -5s TO +2s
@@ -126,20 +126,21 @@ class Nu_dataset(Dataset):
     def process(self):  # 处理数据的函数,最关键（怎么创建，怎么保存）
         idx = 0
         # for idx in range(len(self.data_split)):
-            # Read data from `raw_path`.
+        # Read data from `raw_path`.
         for instance_sample in self.data_split:
-            target_feats = self.get_target_agent(instance_sample)
-            lane_feats = self.get_map(instance_sample)
-            other_feats = self.get_other(instance_sample)
-
+            # target_feats = self.get_target_agent(instance_sample)
+            # lane_feats = self.get_map(instance_sample)
+            # other_feats = self.get_other(instance_sample)
             # 更改结构,采用pyg data格式
             #
+            # all_feats = {
+            #     "target": target_feats,
+            #     "lane": lane_feats,
+            #     "other": other_feats
+            # }
 
-            all_feats = {
-                "target": target_feats,
-                "lane": lane_feats,
-                "other": other_feats
-            }
+            input, num_representation = self.get_inputs(idx)
+
             data = Data(
                 edge_index=torch.from_numpy(np.array()),
                 x=torch.from_numpy(np.array()),
@@ -168,7 +169,7 @@ class Nu_dataset(Dataset):
         :param idx: data index
         :return fut: future trajectory for target agent, shape: [t_f * 2, 2]
         """
-        i_t, s_t = self.token_list[idx].split("_")
+        i_t, s_t = self.data_split[idx].split("_")
         fut = self.helper.get_future_for_agent(i_t, s_t, seconds=self.t_f, in_agent_frame=True)
 
         return fut
@@ -179,27 +180,35 @@ class Nu_dataset(Dataset):
         :param idx: data index
         :return fut: future trajectory for target agent, shape: [t_f * 2, 2]
         """
-        i_t, s_t = self.token_list[idx].split("_")
+        i_t, s_t = self.data_split[idx].split("_")
         past = self.helper.get_past_for_agent(i_t, s_t, seconds=self.obs, in_agent_frame=True)
 
         return past
 
-    def get_inputs(self, idx: int) -> Dict:
+    def get_inputs(self, idx: int) -> Tuple[Dict, Dict]:
         """
         Gets model inputs for nuScenes single agent prediction
         :param idx: data index
         :return inputs: Dictionary with input representations
         """
-        i_t, s_t = self.token_list[idx].split("_")
-        map_representation,num_lane = self.get_map_representation(idx)
-        surrounding_agent_representation,num_veh,num_ped = self.get_surrounding_agent_representation(idx)
+        i_t, s_t = self.data_split[idx].split("_")
+        map_representation, num_lane = self.get_map_representation(idx)
+        surrounding_agent_representation, num_veh, num_ped = self.get_surrounding_agent_representation(idx)
         target_agent_representation = self.get_target_agent_representation(idx)
-        inputs = {'instance_token': i_t,
-                    'sample_token': s_t,
-                    'map_representation': map_representation,
-                    'surrounding_agent_representation': surrounding_agent_representation,
-                    'target_agent_representation': target_agent_representation}
-        return inputs
+        inputs = {'idx': idx,
+                  'instance_token': i_t,
+                  'sample_token': s_t,
+                  'map_representation': map_representation,
+                  'surrounding_agent_representation': surrounding_agent_representation,
+                  'target_agent_representation': target_agent_representation}
+
+        num_representation = {
+            'num_lane_nodes': num_lane,
+            'num_vehicles': num_veh,
+            'num_pedestrians': num_ped
+        }
+
+        return inputs, num_representation
 
     def get_target_agent_global_pose(self, idx: int) -> Tuple[float, float, float]:
         """
@@ -207,7 +216,7 @@ class Nu_dataset(Dataset):
         :param idx: data index
         :return global_pose: (x, y, yaw) or target agent in global co-ordinates
         """
-        i_t, s_t = self.token_list[idx].split("_")
+        i_t, s_t = self.data_split[idx].split("_")
         sample_annotation = self.helper.get_sample_annotation(i_t, s_t)
         x, y = sample_annotation['translation'][:2]
         yaw = quaternion_yaw(Quaternion(sample_annotation['rotation']))
@@ -232,7 +241,7 @@ class Nu_dataset(Dataset):
         :param idx: data index
         :return hist: track history for target agent, shape: [t_h * 2, 5]
         """
-        i_t, s_t = self.token_list[idx].split("_")
+        i_t, s_t = self.data_split[idx].split("_")
 
         # x, y co-ordinates in agent's frame of reference
         hist = self.helper.get_past_for_agent(i_t, s_t, seconds=self.t_h, in_agent_frame=True)
@@ -242,7 +251,7 @@ class Nu_dataset(Dataset):
 
         # Flip to have correct order of timestamps
         hist = np.flip(hist, 0)
-        hist_zeropadded[-hist.shape[0]-1: -1] = hist
+        hist_zeropadded[-hist.shape[0] - 1: -1] = hist
         hist = hist_zeropadded
 
         # Get velocity, acc and yaw_rate over past t_h sec
@@ -258,7 +267,7 @@ class Nu_dataset(Dataset):
         :return: Returns an ndarray with lane node features, shape [max_nodes, polyline_length, 5] and an ndarray of
             masks of the same shape, with value 1 if the nodes/poses are empty,
         """
-        i_t, s_t = self.token_list[idx].split("_")
+        i_t, s_t = self.data_split[idx].split("_")
         map_name = self.helper.get_map_name_from_sample_token(s_t)
         map_api = self.maps[map_name]
 
@@ -361,7 +370,7 @@ class Nu_dataset(Dataset):
         for k, v in record_tokens.items():
             for record_token in v:
                 polygon_token = map_api.get(k, record_token)['polygon_token']
-                polygons[k].append(map_api.extract_polygon(polygon_token)) # 很重要
+                polygons[k].append(map_api.extract_polygon(polygon_token))  # 很重要
 
         return polygons
 
@@ -400,7 +409,7 @@ class Nu_dataset(Dataset):
         :param agent_type: 'human' or 'vehicle'
         :return: list of ndarrays of agent track histories.
         """
-        i_t, s_t = self.token_list[idx].split("_")
+        i_t, s_t = self.data_split[idx].split("_")
 
         # Get agent representation in global co-ordinates
         origin = self.get_target_agent_global_pose(idx)
@@ -424,7 +433,8 @@ class Nu_dataset(Dataset):
         agent_list = []
         agent_i_ts = []
         for k, v in agent_details.items():
-            if v and agent_type in v[0]['category_name'] and v[0]['instance_token'] != i_t: # 这里是用来判断v存在并且属于这一类，而且要去掉目标instance token
+            if v and agent_type in v[0]['category_name'] and v[0][
+                'instance_token'] != i_t:  # 这里是用来判断v存在并且属于这一类，而且要去掉目标instance token
                 agent_list.append(agent_hist[k])
                 agent_i_ts.append(v[0]['instance_token'])
 
@@ -510,7 +520,7 @@ class Nu_dataset(Dataset):
         :param idx: data index
         :param data: pre-processed data
         """
-        filename = os.path.join(self.data_dir, self.token_list[idx] + '.pickle')
+        filename = os.path.join(self.data_dir, self.data_split[idx] + '.pickle')
         with open(filename, 'wb') as handle:
             pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -520,8 +530,7 @@ class Nu_dataset(Dataset):
         :param idx: data index
         :return data: Dictionary with batched tensors
         """
-        filename = os.path.join(self.data_dir, self.token_list[idx] + '.pickle')
-
+        filename = os.path.join(self.data_dir, self.data_split[idx] + '.pickle')
 
         if not os.path.isfile(filename):
             print(filename)
@@ -549,10 +558,10 @@ class Nu_dataset(Dataset):
 
         # Rotate
         global_yaw = correct_yaw(global_yaw)
-        theta = np.arctan2(-np.sin(global_yaw-origin_yaw), np.cos(global_yaw-origin_yaw))
+        theta = np.arctan2(-np.sin(global_yaw - origin_yaw), np.cos(global_yaw - origin_yaw))
 
-        r = np.asarray([[np.cos(np.pi/2 - origin_yaw), np.sin(np.pi/2 - origin_yaw)],
-                        [-np.sin(np.pi/2 - origin_yaw), np.cos(np.pi/2 - origin_yaw)]])
+        r = np.asarray([[np.cos(np.pi / 2 - origin_yaw), np.sin(np.pi / 2 - origin_yaw)],
+                        [-np.sin(np.pi / 2 - origin_yaw), np.cos(np.pi / 2 - origin_yaw)]])
         local_x, local_y = np.matmul(r, np.asarray([local_x, local_y]).transpose())
 
         local_pose = (local_x, local_y, theta)
@@ -575,7 +584,7 @@ class Nu_dataset(Dataset):
             n_segments = int(np.ceil(len(lane) / max_len))
             n_poses = int(np.ceil(len(lane) / n_segments))
             for n in range(n_segments):
-                lane_segment = lane[n * n_poses: (n+1) * n_poses]
+                lane_segment = lane[n * n_poses: (n + 1) * n_poses]
                 lane_segments.append(lane_segment)
                 lane_segment_ids.append(lane_ids[idx])
 
@@ -662,5 +671,3 @@ class Nu_dataset(Dataset):
         data['ground_truth']['traj'] = fut
 
         return data
-
-

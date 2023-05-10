@@ -38,6 +38,7 @@ class NuScenesVector(NuScenesTrajectories):
         self.polyline_length = args['polyline_length']
 
         # Load dataset stats (max nodes, max agents etc.)
+        # Load dataset stats (max nodes, max agents etc.)
         if self.mode == 'extract_data':
             stats = self.load_stats()
             self.max_nodes = stats['num_lane_nodes']
